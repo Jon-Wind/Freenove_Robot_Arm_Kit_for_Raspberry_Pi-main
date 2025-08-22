@@ -1,3 +1,4 @@
+# Importing all aspects needed for the Client Main.py
 import sys
 import os
 import threading
@@ -219,19 +220,46 @@ class myClientWindow(QMainWindow, Ui_Arm):
             else:
                 pass
 
+    def play_connection_sound(self):
+        """Play two quick beeps to indicate successful connection."""
+        if hasattr(self, 'cmd') and hasattr(self, 'threading_cmd'):
+            # First beep (1000Hz for 200ms)
+            self.threading_cmd.emit(f"{self.cmd.CMD_BUZZER}1000,200,1\n")
+            # Second beep (1500Hz for 200ms) after 300ms delay
+            QTimer.singleShot(300, lambda: self.threading_cmd.emit(f"{self.cmd.CMD_BUZZER}1500,200,1\n"))
+
     def btn_connect_remote_ip(self):
         if self.pushButton_Arm_Connect.text() == "Connect":  
             self.client.ip = self.lineEdit_Arm_IP_Address.text()
-            if self.client.connect(self.client.ip):  
-                print("Connected the remote ip.")
-                self.read_cmd_handling = threading.Thread(target=self.client.receive_messages)  
-                self.read_cmd_handling.start()
-                self.message_handling = threading.Thread(target=self.process_message) 
-                self.message_handling.start() 
-                self.pushButton_Arm_Connect.setText("Disconnect") 
-            else:  
-                print("Failed to connect the remote ip.")
-                self.pushButton_Arm_Connect.setText("Connect")  
+            try:
+                if self.client.connect(self.client.ip):  
+                    print("Connected to robot arm")
+                    # Start message handling threads
+                    self.read_cmd_handling = threading.Thread(target=self.client.receive_messages)
+                    self.read_cmd_handling.start()
+                    self.message_handling = threading.Thread(target=self.process_message)
+                    self.message_handling.start()
+                    
+                    # Update UI
+                    self.pushButton_Arm_Connect.setText("Disconnect")
+                    self.pushButton_Arm_Connect.setStyleSheet("QPushButton{background-color: #00FF00;color: #000000;}")
+                    
+                    # Play connection sound and log
+                    self.append_text_to_log("✓ Connected to robot arm")
+                    self.play_connection_sound()
+                    
+                    # Run self-test after a short delay
+                    QTimer.singleShot(1000, self.run_self_test)
+                else:  
+                    print("Failed to connect to robot arm")
+                    self.append_text_to_log("✗ Failed to connect to robot arm")
+                    self.pushButton_Arm_Connect.setText("Connect")
+                    
+            except Exception as e:
+                print(f"Connection error: {e}")
+                self.append_text_to_log(f"✗ Connection error: {str(e)}")
+                self.pushButton_Arm_Connect.setText("Connect")
+                
         elif self.pushButton_Arm_Connect.text() == "Disconnect": 
             try:
                 messageThread.stop_thread(self.read_cmd_handling)  

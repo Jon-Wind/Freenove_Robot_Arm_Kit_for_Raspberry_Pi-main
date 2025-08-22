@@ -1,0 +1,1 @@
+All Footage and photos are stored in this folder 
