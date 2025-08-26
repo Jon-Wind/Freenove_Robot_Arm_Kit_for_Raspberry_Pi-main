@@ -1,4 +1,4 @@
-# Importing all aspects needed for the Client Main.py
+# All Imports for the Project
 import sys
 import os
 import threading
@@ -22,6 +22,7 @@ import numpy as np
 from datetime import datetime
 import platform
 
+#Opens up a UI Window on the Laptop when run
 class myClientWindow(QMainWindow, Ui_Arm):
     ui_arm_btn_connect = QtCore.pyqtSignal(str)
     threading_cmd = QtCore.pyqtSignal(str)
@@ -92,7 +93,7 @@ class myClientWindow(QMainWindow, Ui_Arm):
         self.filePath = FileDialogHelper()
         self.connect()  
 
-    def connect(self):
+    def connect(self): #Connects Code components to the Hardware of the Robotic Arm
         self.lineEdit_Arm_IP_Address.textChanged.connect(self.save_ip_address)  
         self.pushButton_Arm_Connect.clicked.connect(self.btn_connect_remote_ip) 
         self.ui_arm_btn_connect.connect(self.ui_arm_show_btn_connect_content)  
@@ -159,13 +160,13 @@ class myClientWindow(QMainWindow, Ui_Arm):
 
     def socket_send(self, cmd):
         if self.client.connect_flag:
-            if self.pushButton_Arm_Load_Relax.text() == "Relax Motor":
+            if self.pushButton_Arm_Load_Relax.text() == "Relax Motor": #Turns Motor off
                 self.client_busy = True
                 self.client.send_messages(cmd + "\r\n")
                 self.record_command(cmd)
                 self.client_busy = False
             else:
-                if cmd.split(" ")[0][0] == "S":
+                if cmd.split(" ")[0][0] == "S": #Sends Gcode commands to the Robotic Arm
                     self.client_busy = True
                     self.client.send_messages(cmd + "\r\n")
                     self.record_command(cmd)
@@ -186,15 +187,15 @@ class myClientWindow(QMainWindow, Ui_Arm):
         for i in range(self.record_area_data_queue.len()):
             self.textEdit_Arm_Record_Area.append(cmd[i])
 
-    def save_ip_address(self):
+    def save_ip_address(self): #Saves the IP Address of the Robotic Arm
         self.record.write_remote_ip(self.lineEdit_Arm_IP_Address.text())
 
-    def process_message(self):
+    def process_message(self): #Processes the messages received from the Robotic Arm
         while True:
             if not self.client.connect_flag:
                 self.client.disconnect()
                 print("Disconnected the remote ip.")
-                self.ui_arm_btn_connect.emit("Connect")
+                self.ui_arm_btn_connect.emit("Connect") #Sends the Connect signal to the UI
                 break
             if self.client.data_queue.empty() is not True:
                 try:
@@ -220,46 +221,26 @@ class myClientWindow(QMainWindow, Ui_Arm):
             else:
                 pass
 
-    def play_connection_sound(self):
-        """Play two quick beeps to indicate successful connection."""
-        if hasattr(self, 'cmd') and hasattr(self, 'threading_cmd'):
-            # First beep (1000Hz for 200ms)
-            self.threading_cmd.emit(f"{self.cmd.CMD_BUZZER}1000,200,1\n")
-            # Second beep (1500Hz for 200ms) after 300ms delay
-            QTimer.singleShot(300, lambda: self.threading_cmd.emit(f"{self.cmd.CMD_BUZZER}1500,200,1\n"))
-
     def btn_connect_remote_ip(self):
-        if self.pushButton_Arm_Connect.text() == "Connect":  
+        if self.pushButton_Arm_Connect.text() == "Connect": #Checks what text the UI is
             self.client.ip = self.lineEdit_Arm_IP_Address.text()
-            try:
-                if self.client.connect(self.client.ip):  
-                    print("Connected to robot arm")
-                    # Start message handling threads
-                    self.read_cmd_handling = threading.Thread(target=self.client.receive_messages)
-                    self.read_cmd_handling.start()
-                    self.message_handling = threading.Thread(target=self.process_message)
-                    self.message_handling.start()
-                    
-                    # Update UI
-                    self.pushButton_Arm_Connect.setText("Disconnect")
-                    self.pushButton_Arm_Connect.setStyleSheet("QPushButton{background-color: #00FF00;color: #000000;}")
-                    
-                    # Play connection sound and log
-                    self.append_text_to_log("✓ Connected to robot arm")
-                    self.play_connection_sound()
-                    
-                    # Run self-test after a short delay
-                    QTimer.singleShot(1000, self.run_self_test)
-                else:  
-                    print("Failed to connect to robot arm")
-                    self.append_text_to_log("✗ Failed to connect to robot arm")
-                    self.pushButton_Arm_Connect.setText("Connect")
-                    
-            except Exception as e:
-                print(f"Connection error: {e}")
-                self.append_text_to_log(f"✗ Connection error: {str(e)}")
-                self.pushButton_Arm_Connect.setText("Connect")
+            if self.client.connect(self.client.ip):  
+                print("Connected the remote ip.")
+                # Play a short beep when connected
+                if self.client.connect_flag:
+                    self.client_busy = True
+                    cmd = self.cmd.CUSTOM_ACTION + str("2") + self.cmd.DECOLLATOR_CHAR + self.cmd.BUZZER_ACTION + str("500")
+                    self.threading_cmd.emit(cmd)
+                    self.client_busy = False
                 
+                self.read_cmd_handling = threading.Thread(target=self.client.receive_messages)  
+                self.read_cmd_handling.start()
+                self.message_handling = threading.Thread(target=self.process_message) 
+                self.message_handling.start() 
+                self.pushButton_Arm_Connect.setText("Disconnect") 
+            else:  
+                print("Failed to connect the remote ip.")
+                self.pushButton_Arm_Connect.setText("Connect")  
         elif self.pushButton_Arm_Connect.text() == "Disconnect": 
             try:
                 messageThread.stop_thread(self.read_cmd_handling)  
@@ -275,7 +256,7 @@ class myClientWindow(QMainWindow, Ui_Arm):
             self.pushButton_Arm_Connect.setText("Connect")  
             self.pushButton_Arm_Load_Relax.setText("Load Motor")
 
-    def ui_arm_show_btn_connect_content(self, content):
+    def ui_arm_show_btn_connect_content(self, content): #Changes the text of the Connect button
         if self.configurationWindow != None:
             self.configurationWindow.close()
         if self.ledWindow != None:
@@ -283,7 +264,7 @@ class myClientWindow(QMainWindow, Ui_Arm):
         self.pushButton_Arm_Load_Relax.setText("Load Motor")
         self.pushButton_Arm_Connect.setText(content)
 
-    def btn_stop_arm(self):
+    def btn_stop_arm(self): #Stops the Robotic Arm
         if self.client.connect_flag:
             self.client_busy = True
             cmd = self.cmd.CUSTOM_ACTION + str("13") + self.cmd.DECOLLATOR_CHAR + self.cmd.ARM_STOP + str("1")
