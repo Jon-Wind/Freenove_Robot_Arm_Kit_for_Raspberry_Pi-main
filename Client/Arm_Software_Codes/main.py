@@ -226,11 +226,25 @@ class myClientWindow(QMainWindow, Ui_Arm):
             self.client.ip = self.lineEdit_Arm_IP_Address.text()
             if self.client.connect(self.client.ip):  
                 print("Connected the remote ip.")
-                # Play a short beep when connected
+                # Play a short beep when connected and turn it off after 0.7 seconds
                 if self.client.connect_flag:
                     self.client_busy = True
-                    cmd = self.cmd.CUSTOM_ACTION + str("2") + self.cmd.DECOLLATOR_CHAR + self.cmd.BUZZER_ACTION + str("500")
-                    self.threading_cmd.emit(cmd)
+                    # Turn on the buzzer
+                    cmd_on = self.cmd.CUSTOM_ACTION + str("2") + self.cmd.DECOLLATOR_CHAR + self.cmd.BUZZER_ACTION + str("700")
+                    self.threading_cmd.emit(cmd_on)
+                    
+                    # Schedule the buzzer to turn off after 0.7 seconds
+                    def stop_buzzer():
+                        if self.client.connect_flag:  # Only if still connected
+                            self.client_busy = True
+                            cmd_off = self.cmd.CUSTOM_ACTION + str("2") + self.cmd.DECOLLATOR_CHAR + self.cmd.BUZZER_ACTION + str("0")
+                            self.threading_cmd.emit(cmd_off)
+                            self.client_busy = False
+                    
+                    timer = threading.Timer(0.7, stop_buzzer)
+                    timer.daemon = True  # This ensures the timer won't prevent program exit
+                    timer.start()
+                    
                     self.client_busy = False
                 
                 self.read_cmd_handling = threading.Thread(target=self.client.receive_messages)  
