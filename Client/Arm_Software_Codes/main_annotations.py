@@ -1030,4 +1030,4 @@ class myClientWindow(QMainWindow, Ui_Arm):
                     # RETR_TREE: retrieves all contours and hierarchy
                     # CHAIN_APPROX_SIMPLE: compresses horizontal/vertical/diagonal segments
 
-      # LINE 662 IN THE MAIN 
+      # LINE 662 IN THE MAIN & ABOVE THESE ARE PROOFRED ALREADY 
