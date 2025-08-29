@@ -1029,5 +1029,621 @@ class myClientWindow(QMainWindow, Ui_Arm):
                     # Find contours in the binary image
                     # RETR_TREE: retrieves all contours and hierarchy
                     # CHAIN_APPROX_SIMPLE: compresses horizontal/vertical/diagonal segments
+              # Handle Gray Picture conversion button press
+        elif index.objectName() == "pushButton_Arm_Gray_Picture": 
+            try:
+                # Check if raw image data exists
+                if len(self.raw_img):
+                    # Set image flag to indicate grayscale mode
+                    self.img_flag = 2
+                    # Convert BGR color image to grayscale using OpenCV
+                    self.gray_img = cv2.cvtColor(self.raw_img, cv2.COLOR_BGR2GRAY)  
+                    # Convert grayscale numpy array to QImage for Qt display
+                    img = QImage(self.gray_img.data.tobytes(), self.gray_img.shape[1], self.gray_img.shape[0], QImage.Format_Indexed8) 
+                    # Display the grayscale image in the video label widget
+                    self.label_Arm_Video.setPixmap(QPixmap.fromImage(img))  
+                    # Store copy of image for drawing operations
+                    self.original_label_img = self.gray_img.copy()
+            except:
+                print("Show gary picture failed.")
 
-      # LINE 662 IN THE MAIN & ABOVE THESE ARE PROOFRED ALREADY 
+        # Handle Binary Image processing button press
+        elif index.objectName() == "pushButton_Arm_Binaryzation_Picture":  
+            try:
+                # Check if grayscale image exists
+                if len(self.gray_img):
+                    # Set image flag to indicate binary mode
+                    self.img_flag = 3
+                    img = self.gray_img.copy() 
+                    # Apply threshold to convert grayscale to binary (black/white)
+                    ret, binary = cv2.threshold(img, self.threshold_value, 255, cv2.THRESH_BINARY)  
+                    # Apply Gaussian blur for noise reduction
+                    img = cv2.GaussianBlur(binary, (self.gauss_value, self.gauss_value), 0, 0)  
+                    # Create sharpening kernel matrix
+                    kernel = np.array([[0, -1, 0], [-1, self.sharpen_value, -1], [0, -1, 0]], np.float32)  
+                    # Apply sharpening filter using the kernel
+                    img = cv2.filter2D(img, -1, kernel=kernel) 
+                    # Store processed binary image
+                    self.binary_img = img.copy()  
+                    # Convert to QImage for display
+                    img = QImage(img.data.tobytes(), img.shape[1], img.shape[0], QImage.Format_Indexed8)  
+                    # Display the binary image
+                    self.label_Arm_Video.setPixmap(QPixmap.fromImage(img))
+                    # Store for drawing operations
+                    self.original_label_img = self.binary_img.copy()
+            except:
+                print("Show binaryzation picture failed.")
+
+        # Handle Contour Detection button press
+        elif index.objectName() == "pushButton_Arm_Contour_Picture":
+            try:
+                # Check if binary image exists
+                if len(self.binary_img):
+                    # Set image flag to indicate contour mode
+                    self.img_flag = 4
+                    img = self.binary_img.copy() 
+                    # Initialize contour data storage
+                    self.contours_data = None  
+                    self.hierarchy_data = None 
+                    # Find contours using tree hierarchy and simple approximation
+                    # RETR_TREE: retrieves all contours and reconstructs full hierarchy
+                    # CHAIN_APPROX_SIMPLE: compresses horizontal/vertical/diagonal segments
+                    self.contours_data, self.hierarchy_data = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    # Create blank white canvas for contour drawing
+                    img1 = np.zeros(shape=img.shape, dtype=np.uint8)  
+                    img1 += 255  # Fill with white (255)
+                    # Draw all contours in black on white background
+                    cv2.drawContours(img1, self.contours_data, -1, (0, 0, 0), 1)  
+                    # Store contour image
+                    self.contour_img = img1.copy()  
+                    # Convert to QImage and display
+                    img1 = QImage(img1.data.tobytes(), img1.shape[1], img1.shape[0], QImage.Format_Indexed8)  
+                    self.label_Arm_Video.setPixmap(QPixmap.fromImage(img1))
+                    # Store for drawing operations
+                    self.original_label_img = self.contour_img.copy()
+            except:
+                print("Show contour picture failed.")
+
+        # Handle Clear All button press - resets drawing and G-code data
+        elif index.objectName() == "pushButton_Arm_Clear_All":
+            # Reset line drawing counters
+            self.line_curves_count = 1
+            self.current_line_curves = 0
+            # Clear all stored data
+            self.gcode_command.clear()
+            self.painter_point.clear()
+            self.textEdit_Arm_Gcode_Area.clear()
+            
+            # Restore original image based on current mode
+            if self.img_flag == 0:
+                self.original_label_img = self.white_image.copy()
+            elif self.img_flag == 1:
+                self.original_label_img = self.raw_img.copy()
+            elif self.img_flag == 2:
+                self.original_label_img = self.gray_img.copy()
+            elif self.img_flag == 3:
+                self.original_label_img = self.binary_img.copy()
+            elif self.img_flag == 4:
+                self.original_label_img = self.contour_img.copy()
+            
+            # Reset drawing points
+            self.lastPoint = [0, 0]
+            self.currentPoint = [0, 0]
+            # Update display
+            self.updata_label_show()
+
+        # Handle G-code Generation button press
+        elif index.objectName() == "pushButton_Arm_Change_Gcode":
+            try:
+                # Calculate Z-axis heights for pen up/down movements
+                z_height = float(self.lineEdit_Arm_Pen_Height_Value.text()) + float(self.original_position_axis[2])
+                z_axis = float(self.original_position_axis[2])
+                
+                # Check if in image processing mode
+                if self.radioButton_Arm_Img_Mode.isChecked():
+                    # Generate G-code from contour data
+                    if len(self.contour_img):
+                        self.gcode_command.clear()
+                        
+                        # Process each contour (skip index 0 - usually outer boundary)
+                        for i in range(1, len(self.contours_data)):
+                            track_last_point_command = None
+                            
+                            # Process each point in the contour
+                            for j in range(len(self.contours_data[i])):
+                                # Extract x,y coordinates from contour point
+                                buf = list(self.contours_data[i][j][0])
+                                
+                                if j == 0:  # First point of contour
+                                    # Lift pen (move to z_height)
+                                    gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_X_ACTION + str(self.last_axis_point[0]) + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_Y_ACTION + str(self.last_axis_point[1]) + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_Z_ACTION + str(round(z_height, 1))
+                                    self.gcode_command.put(gcode_change_command)
+                                    
+                                    # Map pixel coordinates to physical coordinates
+                                    x = self.map(buf[0], 0, self.label_videl_size[0], self.axis_map_x[0], self.axis_map_x[1], 1)
+                                    y = self.map(buf[1], 0, self.label_videl_size[1], self.axis_map_y[0], self.axis_map_y[1], 1)
+                                    
+                                    # Move to start position with pen up
+                                    gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_Z_ACTION + str(round(z_height, 1))
+                                    self.gcode_command.put(gcode_change_command)
+                                    
+                                    # Lower pen to drawing position
+                                    gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_Z_ACTION + str(z_axis)
+                                    self.gcode_command.put(gcode_change_command)
+                                    
+                                    # Remember first point for closing contour
+                                    track_last_point_command = [x, y]
+                                    self.last_axis_point = [x, y]
+                                else:  
+                                    # Subsequent points - draw lines with pen down
+                                    x = self.map(buf[0], 0, self.label_videl_size[0], self.axis_map_x[0], self.axis_map_x[1], 1)
+                                    y = self.map(buf[1], 0, self.label_videl_size[1], self.axis_map_y[0], self.axis_map_y[1], 1)
+                                    
+                                    # Move to next point with pen down
+                                    gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                                        + self.cmd.AXIS_Z_ACTION + str(z_axis)
+                                    self.gcode_command.put(gcode_change_command)
+                                    self.last_axis_point = [x, y]
+                            
+                            # Close the contour by returning to first point
+                            gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                + self.cmd.AXIS_X_ACTION + str(track_last_point_command[0]) + self.cmd.DECOLLATOR_CHAR \
+                                + self.cmd.AXIS_Y_ACTION + str(track_last_point_command[1]) + self.cmd.DECOLLATOR_CHAR \
+                                + self.cmd.AXIS_Z_ACTION + str(z_axis)
+                            self.gcode_command.put(gcode_change_command)
+                            self.last_axis_point = [track_last_point_command[0], track_last_point_command[1]]
+                        
+                        # Final pen lift and return to home position
+                        gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_X_ACTION + str(self.last_axis_point[0]) + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_Y_ACTION + str(self.last_axis_point[1]) + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_Z_ACTION + str(round(z_height, 1))
+                        self.gcode_command.put(gcode_change_command)
+                        
+                        # Move to home position (0, 200)
+                        self.last_axis_point = [0, 200]
+                        gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_X_ACTION + str(self.last_axis_point[0]) + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_Y_ACTION + str(self.last_axis_point[1]) + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_Z_ACTION + str(round(z_height, 1))
+                        self.gcode_command.put(gcode_change_command)
+                        
+                        # Display generated G-code in text area
+                        self.textEdit_Arm_Gcode_Area.clear()
+                        gcode_change_command = self.gcode_command.gets()
+                        for i in range(self.gcode_command.len()):
+                            self.textEdit_Arm_Gcode_Area.append(gcode_change_command[i])
+                    else:
+                        # No contour data available
+                        self.textEdit_Arm_Gcode_Area.clear()
+                else:
+                    # Manual drawing mode - generate G-code from drawn lines
+                    self.gcode_command.clear()  
+                    self.textEdit_Arm_Gcode_Area.clear()
+                    
+                    if self.painter_point.len() > 0:
+                        self.current_line_curves = 0
+                        buf_point = self.painter_point.gets()
+                        
+                        # Process each drawn line segment
+                        for i in range(self.painter_point.len()):
+                            # Check if starting new line (different curve number)
+                            if self.current_line_curves != buf_point[i][2]: 
+                                # Lift pen and move to start of new line
+                                x = self.last_axis_point[0]
+                                y = self.last_axis_point[1]
+                                gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Z_ACTION + str(round(z_height, 1))
+                                self.gcode_command.put(gcode_change_command)
+                                
+                                # Map start point coordinates
+                                x = self.map(buf_point[i][0][0], 0, self.label_videl_size[0], self.axis_map_x[0], self.axis_map_x[1], 1)
+                                y = self.map(buf_point[i][0][1], 0, self.label_videl_size[1], self.axis_map_y[0], self.axis_map_y[1], 1)
+                                
+                                # Move to start position with pen up
+                                gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Z_ACTION + str(round(z_height, 1))
+                                self.gcode_command.put(gcode_change_command)
+                                
+                                # Lower pen to start drawing
+                                gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Z_ACTION + str(z_axis)
+                                self.gcode_command.put(gcode_change_command)
+                                
+                                # Map end point and draw line
+                                x = self.map(buf_point[i][1][0], 0, self.label_videl_size[0], self.axis_map_x[0], self.axis_map_x[1], 1)
+                                y = self.map(buf_point[i][1][1], 0, self.label_videl_size[1], self.axis_map_y[0], self.axis_map_y[1], 1)
+                                gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Z_ACTION + str(z_axis)
+                                self.gcode_command.put(gcode_change_command)
+                                
+                                self.last_axis_point = [x, y]
+                                self.current_line_curves = buf_point[i][2] 
+                            else:
+                                # Continue drawing same line
+                                x = self.map(buf_point[i][1][0], 0, self.label_videl_size[0], self.axis_map_x[0], self.axis_map_x[1], 1)
+                                y = self.map(buf_point[i][1][1], 0, self.label_videl_size[1], self.axis_map_y[0], self.axis_map_y[1], 1)
+                                gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                                    + self.cmd.AXIS_Z_ACTION + str(z_axis)
+                                self.gcode_command.put(gcode_change_command)
+                                self.last_axis_point = [x, y]
+                        
+                        # Lift pen at end of drawing
+                        x = self.last_axis_point[0]
+                        y = self.last_axis_point[1]
+                        gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_Z_ACTION + str(round(z_height, 1))
+                        self.gcode_command.put(gcode_change_command)
+                        
+                        # Return to home position
+                        self.last_axis_point = [0, 200]
+                        x = self.last_axis_point[0]
+                        y = self.last_axis_point[1]
+                        gcode_change_command = self.cmd.MOVE_ACTION + str("0") + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_X_ACTION + str(x) + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_Y_ACTION + str(y) + self.cmd.DECOLLATOR_CHAR \
+                            + self.cmd.AXIS_Z_ACTION + str(round(z_height, 1))
+                        self.gcode_command.put(gcode_change_command)
+                        
+                        # Display generated G-code
+                        gcode_change_command = self.gcode_command.gets()
+                        for i in range(self.gcode_command.len()):
+                            self.textEdit_Arm_Gcode_Area.append(gcode_change_command[i])
+            except:
+                print("Change Picture to G-Code failed.")
+
+        # Handle G-code Execution button press
+        elif index.objectName() == "pushButton_Arm_Execute_Gcode":
+            # Check if connected to robot
+            if self.client.connect_flag:
+                # Check if G-code commands exist
+                if self.gcode_command.len() > 0:
+                    # Check if motors are loaded (not relaxed)
+                    if self.pushButton_Arm_Load_Relax.text() == "Relax Motor":
+                        # Start execution in separate thread
+                        execte_handle = threading.Thread(target=self.send_Image_command)
+                        execte_handle.start()
+                    else:
+                        print("Please press the \"Load Motor\" button first.")
+                else:
+                    # No G-code to execute, clear display
+                    self.textEdit_Arm_Gcode_Area.clear()
+            else:
+                print("Connect the remote IP address first.")
+
+    def img_slider_control(self, index):
+        #Handle image processing parameter slider controls"""
+        
+        # Threshold slider for binary conversion
+        if index.objectName() == "horizontalSlider_Arm_Threshold": 
+            self.threshold_value = index.value()
+            self.lineEdit_Arm_Threshold_Value.setText(str(self.threshold_value))  
+        
+        # Gaussian blur slider (must be odd number)
+        elif index.objectName() == "horizontalSlider_Arm_Gauss":
+            self.gauss_value = index.value()  
+            # Ensure Gaussian kernel size is odd
+            if self.gauss_value % 2 == 0:  
+                self.gauss_value = self.gauss_value + 1  
+            self.lineEdit_Arm_Gauss_Value.setText(str(self.gauss_value)) 
+            index.setValue(self.gauss_value) 
+        
+        # Sharpening intensity slider
+        elif index.objectName() == "horizontalSlider_Arm_Sharpen":
+            self.sharpen_value = index.value() 
+            self.lineEdit_Arm_Sharpen_Value.setText(str(self.sharpen_value)) 
+        
+        # Pen height slider for Z-axis control
+        elif index.objectName() == "horizontalSlider_Arm_Pen_Height":
+            self.lineEdit_Arm_Pen_Height_Value.setText(str(index.value()))
+        
+        # Real-time image processing update when in binary or contour mode
+        if self.img_flag >= 3:
+            try:
+                # Reprocess image with new parameters
+                img = self.gray_img.copy() 
+                # Apply threshold with updated value
+                ret, binary = cv2.threshold(img, self.threshold_value, 255, cv2.THRESH_BINARY)
+                # Apply Gaussian blur with updated kernel size
+                img = cv2.GaussianBlur(binary, (self.gauss_value, self.gauss_value), 0, 0)  
+                # Apply sharpening with updated intensity
+                kernel = np.array([[0, -1, 0], [-1, self.sharpen_value, -1], [0, -1, 0]], np.float32) 
+                img = cv2.filter2D(img, -1, kernel=kernel)  
+                # Update stored binary image
+                self.binary_img = img.copy() 
+                self.original_label_img = img.copy()
+                
+                # If in contour mode, recalculate contours
+                if self.img_flag == 4:
+                    self.contours_data = None 
+                    self.hierarchy_data = None 
+                    # Find contours with updated binary image
+                    self.contours_data, self.hierarchy_data = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    # Create new contour display image
+                    img1 = np.zeros(shape=img.shape, dtype=np.uint8) 
+                    img1 += 255  # White background
+                    # Draw contours in black
+                    cv2.drawContours(img1, self.contours_data, -1, (0, 0, 0), 1)
+                    self.contour_img = img1.copy()  
+                    self.original_label_img = img1.copy()
+                    # Display updated contour image
+                    img1 = QImage(img1.data.tobytes(), img1.shape[1], img1.shape[0],
+                                  QImage.Format_Indexed8)  
+                    self.label_Arm_Video.setPixmap(QPixmap.fromImage(img1))  
+                else:
+                    # Display updated binary image
+                    img = QImage(img.data.tobytes(), img.shape[1], img.shape[0], QImage.Format_Indexed8)  
+                    self.label_Arm_Video.setPixmap(QPixmap.fromImage(img))
+            except:
+                print("Show binaryzation picture failed.")
+
+    def control_servo_angle(self, index):
+        #Control servo motor angle with increment/decrement buttons
+        
+        # Increase servo angle by 5 degrees
+        if index.objectName() == "pushButton_Arm_Servo_Turn_On":
+            self.angle_value = int(self.lineEdit_Arm_Servo_Angle_Value.text()) + 5
+            # Constrain angle within 0-180 degree range
+            self.angle_value = self.constrain(self.angle_value, 0, 180)
+            self.lineEdit_Arm_Servo_Angle_Value.setText(str(self.angle_value))
+        
+        # Decrease servo angle by 5 degrees
+        elif index.objectName() == "pushButton_Arm_Servo_Turn_Off":
+            self.angle_value = int(self.lineEdit_Arm_Servo_Angle_Value.text()) - 5
+            # Constrain angle within 0-180 degree range
+            self.angle_value = self.constrain(self.angle_value, 0, 180)
+            self.lineEdit_Arm_Servo_Angle_Value.setText(str(self.angle_value))
+        
+        # Send servo command if connected
+        if self.client.connect_flag:
+            self.client_busy = True
+            # Build servo control command string
+            cmd = self.cmd.CUSTOM_ACTION + str("9") + self.cmd.DECOLLATOR_CHAR \
+                + self.cmd.ARM_SERVO_INDEX + str(self.comboBox_Arm_Servo.currentIndex()) + self.cmd.DECOLLATOR_CHAR \
+                + self.cmd.ARM_SERVO_ANGLE + self.lineEdit_Arm_Servo_Angle_Value.text()
+            # Send command via threading mechanism
+            self.threading_cmd.emit(cmd)
+            # Record command for logging
+            self.record_command(cmd)
+            self.client_busy = False
+        else:
+            print("Connect the remote IP address first.")
+
+    def updata_label_show(self):
+        #Update the display label with current image and drawing overlays
+        
+        img = None
+        # Define line start and end points
+        start_point = (self.lastPoint[0], self.lastPoint[1])  
+        end_point = (self.currentPoint[0], self.currentPoint[1])  
+        
+        # Handle different drawing modes
+        if self.painter_line_style == 1:
+            # Temporary line mode - only show line while drawing
+            if self.isDrawing:
+                img = self.original_label_img.copy()  # Copy for temporary overlay
+            else:
+                img = self.original_label_img  # Use original without overlay
+        else:
+            # Permanent drawing mode
+            img = self.original_label_img
+        
+        # Draw line if start and end points are different
+        if start_point != end_point:
+            cv2.line(img, start_point, end_point, (0, 0, 0), 1, cv2.LINE_AA) 
+        
+        # Convert to appropriate QImage format based on image type
+        if self.img_flag <= 1:
+            # Color images (raw/white) use RGB888 format
+            img = QImage(img.data.tobytes(), img.shape[1], img.shape[0], QImage.Format_RGB888) 
+        else:
+            # Grayscale/binary images use Indexed8 format
+            img = QImage(img.data.tobytes(), img.shape[1], img.shape[0], QImage.Format_Indexed8)  
+        
+        # Display updated image
+        self.label_Arm_Video.setPixmap(QPixmap.fromImage(img)) 
+
+    def mousePressEvent(self, event):
+        #Handle mouse press events for drawing functionality
+        
+        # Only respond to left mouse button
+        if event.button() == Qt.LeftButton: 
+            # Only draw if drawing mode is enabled
+            if self.painter_line_style != 0:
+                # Constrain mouse position to image boundaries
+                x = self.constrain(event.pos().x(), 0, self.label_videl_size[0])
+                y = self.constrain(event.pos().y(), 0, self.label_videl_size[1])
+                # Set current point and initialize last point
+                self.currentPoint = [x, y]  
+                self.lastPoint = self.currentPoint.copy() 
+                # Enable drawing flag
+                self.isDrawing = True
+
+    def mouseMoveEvent(self, event):
+        #Handle mouse move events for continuous line drawing
+        
+        # Check if left button is held down during movement
+        if event.buttons() and Qt.LeftButton:  
+            # Only draw if drawing mode is enabled
+            if self.painter_line_style != 0:
+                # Constrain movement to image boundaries
+                x = self.constrain(event.pos().x(), 0, self.label_videl_size[0])
+                y = self.constrain(event.pos().y(), 0, self.label_videl_size[1])
+                self.currentPoint = [x, y]
+                # Update display with current line
+                self.updata_label_show()
+                
+                # Store line segments for permanent drawing mode
+                if self.painter_line_style == 2:
+                    # Store line segment with curve identifier
+                    self.painter_point.put([self.lastPoint, self.currentPoint, self.line_curves_count])
+                    # Update last point for next segment
+                    self.lastPoint = self.curren
+
+def mouseMoveEvent(self, event):
+    #Handle mouse move events for drawing operations.
+    #this method is called continuously while the mouse is being moved.
+    
+    # Check if left mouse button is pressed during movement (for dragging)
+    if event.buttons() and Qt.LeftButton:  
+        # Only process if we're in a drawing mode (painter_line_style != 0)
+        if self.painter_line_style != 0:
+            # Constrain mouse coordinates to stay within the video label boundaries
+            # This prevents drawing outside the designated area
+            x = self.constrain(event.pos().x(), 0, self.label_videl_size[0])
+            y = self.constrain(event.pos().y(), 0, self.label_videl_size[1])
+            
+            # Update current point with constrained coordinates
+            self.currentPoint = [x, y]
+            
+            # Refresh the display to show the drawing progress
+            self.updata_label_show()
+            
+            # If painter_line_style == 2, this appears to be continuous drawing mode
+            # Store line segments as the mouse moves (real-time drawing)
+            if self.painter_line_style == 2:
+                # Add a line segment from last point to current point
+                self.painter_point.put([self.lastPoint, self.currentPoint, self.line_curves_count])
+                # Update lastPoint for the next line segment
+                self.lastPoint = self.currentPoint.copy()
+
+def mouseReleaseEvent(self, event):
+    #andle mouse release events to finalize drawing operations.
+    # Only process left mouse button releases
+    if event.button() == Qt.LeftButton:  
+        # Only process if we're in a drawing mode
+        if self.painter_line_style != 0:
+            # Constrain final coordinates to video label boundaries
+            x = self.constrain(event.pos().x(), 0, self.label_videl_size[0])
+            y = self.constrain(event.pos().y(), 0, self.label_videl_size[1])
+            self.currentPoint = [x, y]
+            
+            # Check if the mouse actually moved during the click
+            # If lastPoint and currentPoint are the same, it was just a click (no drag)
+            if self.lastPoint[0] == self.currentPoint[0] and self.lastPoint[1] == self.currentPoint[1]:
+                pass  # Do nothing for single clicks
+            else:
+                # Add the final line segment for drawing modes other than continuous drawing
+                self.painter_point.put([self.lastPoint, self.currentPoint, self.line_curves_count])
+            
+            # Mark drawing as finished
+            self.isDrawing = False
+            
+            # Update the display with the completed drawing
+            self.updata_label_show()
+            
+            # Increment the curve counter for the next drawing operation
+            self.line_curves_count = self.line_curves_count + 1
+
+def close_parameter_ui(self, data):
+    #Handle closing of the parameter configuration UI and process returned data.
+    
+    Args:
+    data (str): Comma-separated string containing position data and status flag
+    # Parse the comma-separated data string
+    data = data.split(",")
+    
+    # Check the status flag (4th element, index 3)
+    if data[3] == "1":
+        # Status "1": Successfully configured, update display and enable button
+        self.ui_arm_show_label_axis(data[:3])  # Show first 3 elements (x,y,z positions)
+        self.original_position_axis = data[:3]  # Store original axis positions
+        self.pushButton_Arm_Parameter_UI.setEnabled(True)  # Re-enable the parameter UI button
+    elif data[3] == "0":
+        # Status "0": Configuration cancelled or failed, but still update display
+        self.ui_arm_show_label_axis(data[:3])
+        self.original_position_axis = data[:3]
+        # Note: Button remains disabled in this case
+
+def configure_parameter_ui(self):
+     #Open the parameter configuration window for arm control.
+     #Includes validation to ensure proper connection and motor state.
+
+    # Check if client is connected to remote system
+    if self.client.connect_flag:
+        # Check if motors are loaded (button text indicates current state)
+        if self.pushButton_Arm_Load_Relax.text() == "Relax Motor":
+            # Motors are loaded, safe to configure parameters
+            # Disable the parameter button to prevent multiple windows
+            self.pushButton_Arm_Parameter_UI.setEnabled(False)
+            
+            # Create and display the configuration window
+            self.configurationWindow = Configuration()
+            self.configurationWindow.setWindowModality(Qt.NonModal)  # Allow interaction with parent
+            self.configurationWindow.show()
+            
+            # Connect signals to handle window closing and command sending
+            self.configurationWindow.position_axis_channel.connect(self.close_parameter_ui)
+            self.configurationWindow.send_cmd_channel.connect(self.socket_send)
+        else:
+            # Motors not loaded - show error message
+            print("Please press the \"Load Motor\" button first.")
+    else:
+        # Not connected to remote system - show error message
+        print("Connect the remote IP address first.")
+
+def close_led_ui(self):
+    #Handle closing of the LED control UI.
+    #Simply re-enables the LED UI button for future use.
+    self.pushButton_Arm_Led_UI.setEnabled(True)
+
+def configure_led_ui(self):
+    #Open the LED control window for arm lighting configuration.
+    #Includes connection validation.
+    
+    # Check if client is connected to remote system
+    if self.client.connect_flag:
+        # Disable the LED button to prevent multiple windows
+        self.pushButton_Arm_Led_UI.setEnabled(False)
+        
+        # Create and display the LED control window
+        self.ledWindow = LED()
+        self.ledWindow.setWindowModality(Qt.NonModal)  # Allow interaction with parent
+        self.ledWindow.show()
+        
+        # Connect signals for window management and command sending
+        self.ledWindow.signal_channel.connect(self.close_led_ui)
+        self.ledWindow.send_cmd_channel.connect(self.socket_send)
+    else:
+        # Not connected - show error message
+        print("Connect the remote IP address first.")
+
+# Application entry point
+if __name__ == '__main__':
+    # Main application startup code.
+    # Creates the QApplication, main window, and starts the event loop.
+    
+    # Create the Qt application instance
+    app = QApplication(sys.argv)
+    
+    # Create the main client window instance
+    myshow = myClientWindow()
+    
+    # Display the main window
+    myshow.show()
+    
+    # Start the Qt event loop and exit when it's done
+    sys.exit(app.exec_())
